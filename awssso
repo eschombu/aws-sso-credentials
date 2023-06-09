@@ -112,8 +112,18 @@ def _get_aws_profile(profile_name):
 def _get_sso_cached_login(profile):
     _print_msg('\nChecking for SSO credentials...')
 
-    cache = hashlib.sha1(profile["sso_start_url"].encode("utf-8")).hexdigest()
-    sso_cache_file = f'{AWS_SSO_CACHE_PATH}/{cache}.json'
+    sso_start_url = profile["sso_start_url"]
+    sso_cache_file = f'{AWS_SSO_CACHE_PATH}/{hashlib.sha1(sso_start_url.encode("utf-8")).hexdigest()}'
+    if not Path(sso_cache_file).is_file():
+        # My `aws sso login` command does not produce a file with the name created by the sha1 hashing method above.
+        # Instead, cycle through existing cache files and look for first with matching start url.
+        cache_filenames = os.listdir(AWS_SSO_CACHE_PATH)
+        sso_cache_file = None
+        for cache in cache_filenames:
+            sso_cache_file = f'{AWS_SSO_CACHE_PATH}/{cache}'
+            cache_data = _load_json(sso_cache_file)
+            if cache_data.get("startUrl") == sso_start_url:
+                break
 
     if not Path(sso_cache_file).is_file():
         _print_error(
@@ -126,7 +136,8 @@ def _get_sso_cached_login(profile):
 
         if data.get('region') != profile['sso_region']:
             _print_error(
-                'SSO authentication region in cache does not match region defined in profile')
+                f"SSO authentication region in cache ('{data.get('region')}')"
+                f" does not match region defined in profile ('{profile['sso_region']}')")
 
         if now > expires_at:
             _print_error(
