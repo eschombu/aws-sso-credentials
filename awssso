@@ -23,6 +23,7 @@ AWS_CONFIG_PATH = f'{Path.home()}/.aws/config'
 AWS_CREDENTIAL_PATH = f'{Path.home()}/.aws/credentials'
 AWS_SSO_CACHE_PATH = f'{Path.home()}/.aws/sso/cache'
 AWS_DEFAULT_REGION = 'us-east-1'
+PROFILE_PREFIX = 'profile '
 
 
 class Colour:
@@ -153,7 +154,8 @@ def _get_sso_role_credentials(profile, login):
     return response["roleCredentials"]
 
 
-def _store_aws_credentials(profile_name, profile_opts, credentials):
+def _store_aws_credentials(profile, profile_opts, credentials):
+    profile_name = _rm_prefix(profile)
     _print_msg(f'\nAdding to credential files under [{profile_name}]')
 
     region = profile_opts.get("region", AWS_DEFAULT_REGION)
@@ -165,7 +167,7 @@ def _store_aws_credentials(profile_name, profile_opts, credentials):
     config.add_section(profile_name)
     config.set(profile_name, "region", region)
     config.set(profile_name, "aws_access_key_id", credentials["accessKeyId"])
-    config.set(profile_name, "aws_secret_access_key ", credentials["secretAccessKey"])
+    config.set(profile_name, "aws_secret_access_key", credentials["secretAccessKey"])
     config.set(profile_name, "aws_session_token", credentials["sessionToken"])
 
     _write_config(AWS_CREDENTIAL_PATH, config)
@@ -240,7 +242,14 @@ def _print_success(message):
 
 
 def _add_prefix(name):
-    return f'profile {name}' if name != 'default' else 'default'
+    return f'{PROFILE_PREFIX}{name}' if name != 'default' else 'default'
+
+
+def _rm_prefix(name):
+    if name.startswith(PROFILE_PREFIX):
+        return name[len(PROFILE_PREFIX):]
+    else:
+        return name
 
 
 def _read_config(path):
