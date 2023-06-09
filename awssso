@@ -22,7 +22,7 @@ DOCKER_CMD = ['docker', 'run', '--rm', '-t', '-v', f'{Path.home()}/.aws:/root/.a
 AWS_CONFIG_PATH = f'{Path.home()}/.aws/config'
 AWS_CREDENTIAL_PATH = f'{Path.home()}/.aws/credentials'
 AWS_SSO_CACHE_PATH = f'{Path.home()}/.aws/sso/cache'
-AWS_DEFAULT_REGION = 'eu-west-1'
+AWS_DEFAULT_REGION = 'us-east-1'
 
 
 class Colour:
