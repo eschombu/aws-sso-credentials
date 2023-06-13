@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from configparser import ConfigParser
@@ -113,16 +114,20 @@ def _get_sso_cached_login(profile):
     _print_msg('\nChecking for SSO credentials...')
 
     sso_start_url = profile["sso_start_url"]
-    sso_cache_file = f'{AWS_SSO_CACHE_PATH}/{hashlib.sha1(sso_start_url.encode("utf-8")).hexdigest()}'
+    sso_cache_file = f'{AWS_SSO_CACHE_PATH}/{hashlib.sha1(sso_start_url.encode("utf-8")).hexdigest()}.json'
     if not Path(sso_cache_file).is_file():
-        # My `aws sso login` command does not produce a file with the name created by the sha1 hashing method above.
-        # Instead, cycle through existing cache files and look for first with matching start url.
+        # Note(eschomburg): My `aws sso login` command does not produce a file with the name created by the sha1 hashing
+        # method above. Instead, cycle through existing cache files and look for first with matching start url.
+        expected_cache_file = sso_cache_file
         cache_filenames = os.listdir(AWS_SSO_CACHE_PATH)
         sso_cache_file = None
         for cache in cache_filenames:
             sso_cache_file = f'{AWS_SSO_CACHE_PATH}/{cache}'
             cache_data = _load_json(sso_cache_file)
             if cache_data.get("startUrl") == sso_start_url:
+                # boto3 sometimes looks for the credentials in the sso cache at the sha1 hash location rather than the
+                # credentials file
+                shutil.copy(sso_cache_file, expected_cache_file)
                 break
 
     if not Path(sso_cache_file).is_file():
