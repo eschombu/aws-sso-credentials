@@ -62,6 +62,10 @@ def main():
                         action='store_true',
                         help='Use the docker version of the AWS CLI')
 
+    parser.add_argument('--search', '-s',
+                        action='store_true',
+                        help='Search for ')
+
     args = parser.parse_args()
 
     # validate aws v2
@@ -86,12 +90,13 @@ def main():
     if args.login:
         _spawn_cli_for_auth(profile, args.docker)
 
-    _set_profile_credentials(profile, args.use_default if profile != 'default' else False)
+    _set_profile_credentials(profile, use_default=(args.use_default if profile != 'default' else False),
+                             use_sso_hash=(not args.search))
 
 
-def _set_profile_credentials(profile_name, use_default=False):
+def _set_profile_credentials(profile_name, use_default=False, use_sso_hash=True):
     profile_opts = _get_aws_profile(profile_name)
-    cache_login = _get_sso_cached_login(profile_opts)
+    cache_login = _get_sso_cached_login(profile_opts, use_sso_hash=use_sso_hash)
     credentials = _get_sso_role_credentials(profile_opts, cache_login)
 
     if not use_default:
@@ -110,25 +115,42 @@ def _get_aws_profile(profile_name):
     return profile
 
 
-def _get_sso_cached_login(profile):
+def _get_expected_sso_cache_file(sso_start_url: str) -> str:
+    return f'{AWS_SSO_CACHE_PATH}/{hashlib.sha1(sso_start_url.encode("utf-8")).hexdigest()}.json'
+
+
+def _get_sso_cached_login(profile, use_sso_hash=True):
     _print_msg('\nChecking for SSO credentials...')
 
+    now = datetime.now().astimezone(UTC)
     sso_start_url = profile["sso_start_url"]
-    sso_cache_file = f'{AWS_SSO_CACHE_PATH}/{hashlib.sha1(sso_start_url.encode("utf-8")).hexdigest()}.json'
-    if not Path(sso_cache_file).is_file():
-        # Note(eschomburg): My `aws sso login` command does not produce a file with the name created by the sha1 hashing
-        # method above. Instead, cycle through existing cache files and look for first with matching start url.
-        expected_cache_file = sso_cache_file
+
+    # Note(eschomburg): My `aws sso login` command does not produce a file with the name created by the sha1 hashing
+    # method above. Instead, cycle through existing cache files and look for first with matching start url.
+    expected_sso_file = _get_expected_sso_cache_file(sso_start_url)
+    if use_sso_hash:
+        sso_cache_file = expected_sso_file
+    else:
         cache_filenames = os.listdir(AWS_SSO_CACHE_PATH)
-        sso_cache_file = None
-        for cache in cache_filenames:
-            sso_cache_file = f'{AWS_SSO_CACHE_PATH}/{cache}'
-            cache_data = _load_json(sso_cache_file)
-            if cache_data.get("startUrl") == sso_start_url:
-                # boto3 sometimes looks for the credentials in the sso cache at the sha1 hash location rather than the
-                # credentials file
-                shutil.copy(sso_cache_file, expected_cache_file)
-                break
+        active_filenames = []
+        expired_filenames = []
+        for filename in cache_filenames:
+            cache_filename = f'{AWS_SSO_CACHE_PATH}/{filename}'
+            cache_data = _load_json(cache_filename)
+            if cache_data.get('startUrl') == sso_start_url:
+                if parse(cache_data['expiresAt']).astimezone(UTC) <= now:
+                    expired_filenames.append(cache_filename)
+                else:
+                    active_filenames.append(cache_filename)
+        if active_filenames:
+            sso_cache_file = active_filenames[0]
+            for expired in expired_filenames:
+                shutil.copy(sso_cache_file, expired)
+                active_filenames.append(expired)
+            if expected_sso_file not in active_filenames:
+                shutil.copy(sso_cache_file, expected_sso_file)
+        else:
+            sso_cache_file = expected_sso_file
 
     if not Path(sso_cache_file).is_file():
         _print_error(
@@ -136,7 +158,6 @@ def _get_sso_cached_login(profile):
 
     else:
         data = _load_json(sso_cache_file)
-        now = datetime.now().astimezone(UTC)
         expires_at = parse(data['expiresAt']).astimezone(UTC)
 
         if data.get('region') != profile['sso_region']:
